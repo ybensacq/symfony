@@ -441,6 +441,18 @@ abstract class FrameworkExtensionTest extends TestCase
         $this->assertEquals(new Reference('serializer.name_converter.camel_case_to_snake_case'), $container->getDefinition('serializer.normalizer.object')->getArgument(1));
     }
 
+    public function testRegisterSerializerExtractor()
+    {
+        $container = $this->createContainerFromFile('full');
+
+        $serializerExtractorDefinition = $container->getDefinition('property_info.serializer_extractor');
+
+        $this->assertEquals('serializer.mapping.class_metadata_factory', $serializerExtractorDefinition->getArgument(0)->__toString());
+        $this->assertFalse($serializerExtractorDefinition->isPublic());
+        $tag = $serializerExtractorDefinition->getTag('property_info.list_extractor');
+        $this->assertEquals(array('priority' => -999), $tag[0]);
+    }
+
     public function testAssetHelperWhenAssetsAreEnabled()
     {
         $container = $this->createContainerFromFile('full');
@@ -451,7 +463,15 @@ abstract class FrameworkExtensionTest extends TestCase
 
     public function testAssetHelperWhenTemplatesAreEnabledAndAssetsAreDisabled()
     {
-        $container = $this->createContainerFromFile('assets_disabled');
+        $container = $this->createContainerFromFile('full');
+        $packages = $container->getDefinition('templating.helper.assets')->getArgument(0);
+
+        $this->assertSame('assets.packages', (string) $packages);
+    }
+
+    public function testAssetHelperWhenAssetsAndTemplatesAreDisabled()
+    {
+        $container = $this->createContainerFromFile('default_config');
 
         $this->assertFalse($container->hasDefinition('templating.helper.assets'));
     }
@@ -496,7 +516,7 @@ abstract class FrameworkExtensionTest extends TestCase
 
     protected function createContainerFromFile($file, $data = array())
     {
-        $cacheKey = md5($file.serialize($data));
+        $cacheKey = md5(get_class($this).$file.serialize($data));
         if (isset(self::$containerCache[$cacheKey])) {
             return self::$containerCache[$cacheKey];
         }

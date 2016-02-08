@@ -16,10 +16,6 @@ use Symfony\Component\Cache\Adapter\ApcuAdapter;
 
 class ApcuAdapterTest extends CachePoolTest
 {
-    protected $skippedTests = array(
-        'testDeferredExpired' => 'Failing for now, needs to be fixed.',
-    );
-
     public function createCachePool()
     {
         if (defined('HHVM_VERSION')) {
@@ -27,6 +23,9 @@ class ApcuAdapterTest extends CachePoolTest
         }
         if (!function_exists('apcu_fetch') || !ini_get('apc.enabled') || ('cli' === PHP_SAPI && !ini_get('apc.enable_cli'))) {
             $this->markTestSkipped('APCu extension is required.');
+        }
+        if ('\\' === DIRECTORY_SEPARATOR) {
+            $this->markTestSkipped('Fails transiently on Windows.');
         }
 
         return new ApcuAdapter(__CLASS__);

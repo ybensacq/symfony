@@ -25,12 +25,18 @@ class ArrayAdapter implements CacheItemPoolInterface, LoggerAwareInterface
 {
     use LoggerAwareTrait;
 
+    private $storeSerialized;
     private $values = array();
     private $expiries = array();
     private $createCacheItem;
 
-    public function __construct($defaultLifetime = 0)
+    /**
+     * @param int  $defaultLifetime
+     * @param bool $storeSerialized Disabling serialization can lead to cache corruptions when storing mutable values but increases performance otherwise.
+     */
+    public function __construct($defaultLifetime = 0, $storeSerialized = true)
     {
+        $this->storeSerialized = $storeSerialized;
         $this->createCacheItem = \Closure::bind(
             function ($key, $value, $isHit) use ($defaultLifetime) {
                 $item = new CacheItem();
@@ -51,10 +57,16 @@ class ArrayAdapter implements CacheItemPoolInterface, LoggerAwareInterface
      */
     public function getItem($key)
     {
+        if (!$isHit = $this->hasItem($key)) {
+            $value = null;
+        } elseif ($this->storeSerialized) {
+            $value = unserialize($this->values[$key]);
+        } else {
+            $value = $this->values[$key];
+        }
         $f = $this->createCacheItem;
-        $isHit = $this->hasItem($key);
 
-        return $f($key, $isHit ? $this->values[$key] : null, $isHit);
+        return $f($key, $value, $isHit);
     }
 
     /**
@@ -66,7 +78,7 @@ class ArrayAdapter implements CacheItemPoolInterface, LoggerAwareInterface
             $this->validateKey($key);
         }
 
-        return $this->generateItems($keys);
+        return $this->generateItems($keys, time());
     }
 
     /**
@@ -120,25 +132,24 @@ class ArrayAdapter implements CacheItemPoolInterface, LoggerAwareInterface
         $item = (array) $item;
         $key = $item[CacheItem::CAST_PREFIX.'key'];
         $value = $item[CacheItem::CAST_PREFIX.'value'];
-        $lifetime = $item[CacheItem::CAST_PREFIX.'lifetime'];
+        $expiry = $item[CacheItem::CAST_PREFIX.'expiry'];
 
-        if (0 > $lifetime) {
+        if (null !== $expiry && $expiry <= time()) {
             return true;
         }
-
-        if (is_object($value)) {
+        if ($this->storeSerialized) {
             try {
-                $value = clone $value;
+                $value = serialize($value);
             } catch (\Exception $e) {
                 $type = is_object($value) ? get_class($value) : gettype($value);
-                CacheItem::log($this->logger, 'Failed to clone key "{key}" ({type})', array('key' => $key, 'type' => $type, 'exception' => $e));
+                CacheItem::log($this->logger, 'Failed to save key "{key}" ({type})', array('key' => $key, 'type' => $type, 'exception' => $e));
 
                 return false;
             }
         }
 
         $this->values[$key] = $value;
-        $this->expiries[$key] = $lifetime ? $lifetime + time() : PHP_INT_MAX;
+        $this->expiries[$key] = null !== $expiry ? $expiry : PHP_INT_MAX;
 
         return true;
     }
@@ -174,14 +185,20 @@ class ArrayAdapter implements CacheItemPoolInterface, LoggerAwareInterface
         return $key;
     }
 
-    private function generateItems(array $keys)
+    private function generateItems(array $keys, $now)
     {
         $f = $this->createCacheItem;
 
         foreach ($keys as $key) {
-            $isHit = isset($this->expiries[$key]) && ($this->expiries[$key] >= time() || !$this->deleteItem($key));
+            if (!$isHit = isset($this->expiries[$key]) && ($this->expiries[$key] >= $now || !$this->deleteItem($key))) {
+                $value = null;
+            } elseif ($this->storeSerialized) {
+                $value = unserialize($this->values[$key]);
+            } else {
+                $value = $this->values[$key];
+            }
 
-            yield $key => $f($key, $isHit ? $this->values[$key] : null, $isHit);
+            yield $key => $f($key, $value, $isHit);
         }
     }
 }
